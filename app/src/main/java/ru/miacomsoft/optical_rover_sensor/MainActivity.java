@@ -41,7 +41,6 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        // Инициализация View
         webLive = findViewById(R.id.webLive);
         webSettings = findViewById(R.id.webSettings);
         btnToggle = findViewById(R.id.btnToggle);
@@ -54,7 +53,6 @@ public class MainActivity extends AppCompatActivity {
         btnToggle.setOnClickListener(v -> toggleView());
         grantPermBtn.setOnClickListener(v -> requestCameraPermission());
 
-        // Проверка прав на камеру
         if (hasCameraPermission()) {
             grantPermBtn.setVisibility(View.GONE);
             startSensorService();

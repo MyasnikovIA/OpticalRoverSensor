@@ -637,6 +637,17 @@ public class SensorService extends Service {
     public synchronized void startSensorOnly() {
         if (sensorRunning) return;
 
+        // --- ПРОВЕРКА РАЗРЕШЕНИЙ (Android 6+) ---
+        if (Build.VERSION.SDK_INT >= 23) {
+            int check = checkSelfPermission(android.Manifest.permission.CAMERA);
+            if (check != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                lastCameraError = "Нет разрешения на камеру. Откройте настройки приложения и разрешите доступ к камере.";
+                Log.e(TAG, lastCameraError);
+                updateNotification(buildStatusLine());
+                return;
+            }
+        }
+
         tracker.configure(
                 config.targetWidth, config.searchRadius, config.blockSize,
                 config.flowMinVariance, config.flowMinGradient, config.maxSadPx,
@@ -651,8 +662,8 @@ public class SensorService extends Service {
         }
 
         if (!openCamera()) {
-            lastCameraError = "Не удалось открыть камеру. Закройте другие приложения "
-                    + "с камерой и нажмите «Запустить».";
+            // lastCameraError уже установлен внутри openCamera()
+            updateNotification(buildStatusLine());
             return;
         }
 
@@ -672,7 +683,6 @@ public class SensorService extends Service {
         lastFlashState  = "";
         skippedReadings = 0L;
 
-        // Полный сброс позиции/угла/трейла
         synchronized (positionLock) {
             posX = 0.0; posY = 0.0;
             zeroX = 0.0; zeroY = 0.0;
@@ -748,54 +758,96 @@ public class SensorService extends Service {
             dummyTexture = null;
         }
 
-        final int wantedId = config.cameraId;
         int totalCameras = 0;
-        try { totalCameras = android.hardware.Camera.getNumberOfCameras(); } catch (Throwable ignored) {}
+        try { totalCameras = android.hardware.Camera.getNumberOfCameras(); } catch (Throwable t) { Log.e(TAG, "getNumberOfCameras failed", t); }
+        Log.i(TAG, "Total cameras: " + totalCameras);
 
-        int useId = wantedId;
-        if (useId >= 0 && (totalCameras == 0 || useId >= totalCameras)) useId = -1;
+        if (totalCameras == 0) {
+            lastCameraError = "В системе не найдено ни одной камеры (getNumberOfCameras=0).";
+            return false;
+        }
 
-        for (int attempt = 1; attempt <= 3; attempt++) {
-            try {
-                if (useId >= 0) camera = android.hardware.Camera.open(useId);
-                else            camera = android.hardware.Camera.open();
-                if (camera == null) { sleepMs(400); continue; }
-                if (!configureCamera()) {
-                    try { camera.release(); } catch (Exception ignored) {}
-                    camera = null;
-                    sleepMs(400);
-                    continue;
-                }
+        List<Integer> idsToTry = new ArrayList<>();
+        if (config.cameraId >= 0 && config.cameraId < totalCameras) {
+            idsToTry.add(config.cameraId);
+        }
+        for (int i = 0; i < totalCameras; i++) {
+            if (!idsToTry.contains(i)) idsToTry.add(i);
+        }
+
+        String lastErr = "";
+        for (int cameraId : idsToTry) {
+            for (int attempt = 1; attempt <= 2; attempt++) {
                 try {
-                    dummyTexture = new SurfaceTexture(0);
-                    camera.setPreviewTexture(dummyTexture);
-                } catch (Exception e) { Log.w(TAG, "setPreviewTexture failed: " + e.getMessage()); }
-                try { camera.startPreview(); }
-                catch (Exception e) {
-                    try { camera.release(); } catch (Exception ignored) {}
-                    camera = null;
+                    Log.i(TAG, "Trying Camera.open(" + cameraId + "), attempt " + attempt);
+                    camera = android.hardware.Camera.open(cameraId);
+                    if (camera == null) {
+                        lastErr = "Camera.open(" + cameraId + ") вернул null";
+                        Log.w(TAG, lastErr);
+                        sleepMs(400);
+                        continue;
+                    }
+                    if (!configureCamera()) {
+                        lastErr = "configureCamera() не смог настроить камеру " + cameraId;
+                        Log.w(TAG, lastErr);
+                        try { camera.release(); } catch (Exception ignored) {}
+                        camera = null;
+                        sleepMs(400);
+                        continue;
+                    }
+                    try {
+                        dummyTexture = new SurfaceTexture(0);
+                        // ВАЖНО: Некоторые драйверы (особенно USB-камеры) требуют явно задать размер буфера,
+                        // иначе startPreview завершается с ошибкой.
+                        dummyTexture.setDefaultBufferSize(previewWidth, previewHeight);
+                        camera.setPreviewTexture(dummyTexture);
+                    } catch (Exception e) {
+                        lastErr = "setPreviewTexture failed: " + e.getMessage();
+                        Log.e(TAG, lastErr, e);
+                        try { camera.release(); } catch (Exception ignored) {}
+                        camera = null;
+                        if (dummyTexture != null) { try { dummyTexture.release(); } catch (Exception ignored) {} dummyTexture = null; }
+                        sleepMs(400);
+                        continue;
+                    }
+                    try {
+                        camera.startPreview();
+                    } catch (Exception e) {
+                        lastErr = "startPreview: " + e.getMessage();
+                        Log.e(TAG, lastErr, e);
+                        try { camera.release(); } catch (Exception ignored) {}
+                        camera = null;
+                        if (dummyTexture != null) { try { dummyTexture.release(); } catch (Exception ignored) {} dummyTexture = null; }
+                        sleepMs(400);
+                        continue;
+                    }
+                    Log.i(TAG, "Camera " + cameraId + " opened OK. " + previewWidth + "x" + previewHeight);
+                    config.cameraId = cameraId;
+                    return true;
+                } catch (Throwable e) {
+                    lastErr = e.getClass().getSimpleName() + ": " + e.getMessage();
+                    Log.e(TAG, "openCamera(" + cameraId + ") failed", e);
+                    if (camera != null) { try { camera.release(); } catch (Exception ignored) {} camera = null; }
                     if (dummyTexture != null) { try { dummyTexture.release(); } catch (Exception ignored) {} dummyTexture = null; }
                     sleepMs(400);
-                    continue;
                 }
-                return true;
-            } catch (RuntimeException e) {
-                if (camera != null) { try { camera.release(); } catch (Exception ignored) {} camera = null; }
-                if (dummyTexture != null) { try { dummyTexture.release(); } catch (Exception ignored) {} dummyTexture = null; }
-                sleepMs(400);
             }
         }
+
+        lastCameraError = "Не удалось открыть камеру. Причина: " + lastErr
+                + ". Проверьте, что камера не занята другим приложением и разрешение выдано.";
         return false;
     }
 
     private boolean configureCamera() {
         try {
             Camera.Parameters p = camera.getParameters();
+            Log.i(TAG, "Supported preview sizes: " + (p.getSupportedPreviewSizes() != null ? p.getSupportedPreviewSizes().size() : 0));
+
             if (cachedCameraSizes == null) {
                 List<Camera.Size> sizes = p.getSupportedPreviewSizes();
                 if (sizes != null) {
-                    java.util.ArrayList<Camera.Size> sorted =
-                            new java.util.ArrayList<Camera.Size>(sizes);
+                    java.util.ArrayList<Camera.Size> sorted = new java.util.ArrayList<Camera.Size>(sizes);
                     Collections.sort(sorted, new Comparator<Camera.Size>() {
                         @Override public int compare(Camera.Size a, Camera.Size b) {
                             return a.width * a.height - b.width * b.height;
@@ -814,12 +866,27 @@ public class SensorService extends Service {
                     cachedCameraSizes = arr;
                 }
             }
+
             Camera.Size size = pickPreviewSize(p.getSupportedPreviewSizes());
-            if (size == null) return false;
+            if (size == null) {
+                Log.e(TAG, "pickPreviewSize returned null");
+                return false;
+            }
             previewWidth = size.width;
             previewHeight = size.height;
+            Log.i(TAG, "Selected preview size: " + previewWidth + "x" + previewHeight);
+
             p.setPreviewSize(previewWidth, previewHeight);
-            p.setPreviewFormat(ImageFormat.NV21);
+
+            // Некоторые старые камеры не поддерживают NV21 — проверяем и пробуем YV12
+            int previewFormat = ImageFormat.NV21;
+            try {
+                p.setPreviewFormat(ImageFormat.NV21);
+            } catch (Exception e) {
+                Log.w(TAG, "NV21 not supported, trying YV12: " + e.getMessage());
+                previewFormat = ImageFormat.YV12;
+                p.setPreviewFormat(previewFormat);
+            }
 
             try {
                 List<int[]> ranges = p.getSupportedPreviewFpsRange();
@@ -829,6 +896,7 @@ public class SensorService extends Service {
                         if (r[1] > best[1] || (r[1] == best[1] && r[0] < best[0])) best = r;
                     }
                     p.setPreviewFpsRange(best[0], best[1]);
+                    Log.i(TAG, "FPS range: " + best[0] + "-" + best[1]);
                 }
             } catch (Exception ignore) {}
 
@@ -847,9 +915,10 @@ public class SensorService extends Service {
             } catch (Exception ignore) {}
 
             camera.setParameters(p);
+            Log.i(TAG, "Camera parameters applied OK");
 
             int bufSize = previewWidth * previewHeight
-                    * ImageFormat.getBitsPerPixel(ImageFormat.NV21) / 8;
+                    * ImageFormat.getBitsPerPixel(previewFormat) / 8;
             yPlane = new byte[previewWidth * previewHeight];
             tracker.reset(previewWidth, previewHeight);
 
@@ -874,20 +943,41 @@ public class SensorService extends Service {
 
     private Camera.Size pickPreviewSize(List<Camera.Size> sizes) {
         if (sizes == null || sizes.isEmpty()) return null;
+
+        // Если в конфиге задан конкретный размер — пробуем его
         if (config.cameraPreviewWidth > 0 && config.cameraPreviewHeight > 0) {
             for (Camera.Size s : sizes) {
-                if (s.width == config.cameraPreviewWidth
-                        && s.height == config.cameraPreviewHeight) return s;
+                if (s.width == config.cameraPreviewWidth && s.height == config.cameraPreviewHeight)
+                    return s;
             }
+            Log.w(TAG, "Configured size " + config.cameraPreviewWidth + "x"
+                    + config.cameraPreviewHeight + " not in supported list — using auto");
         }
+
+        // 1. Ищем стандартный 640x480 (VGA) — наиболее совместим с USB-камерами
+        for (Camera.Size s : sizes) {
+            if (s.width == 640 && s.height == 480) return s;
+        }
+        // 2. Ищем 320x240 (QVGA)
+        for (Camera.Size s : sizes) {
+            if (s.width == 320 && s.height == 240) return s;
+        }
+        // 3. Любой размер >= 320x240 с минимальной площадью
         Camera.Size best = null;
         for (Camera.Size s : sizes) {
-            if (s.width < 128 || s.height < 96) continue;
-            if (best == null) { best = s; continue; }
-            if (s.width * s.height < best.width * best.height) best = s;
+            if (s.width >= 320 && s.height >= 240) {
+                if (best == null || s.width * s.height < best.width * best.height) best = s;
+            }
         }
-        if (best == null) best = sizes.get(0);
-        return best;
+        if (best != null) return best;
+
+        // 4. Fallback на минимальный >= 128x96
+        for (Camera.Size s : sizes) {
+            if (s.width >= 128 && s.height >= 96) {
+                if (best == null || s.width * s.height < best.width * best.height) best = s;
+            }
+        }
+        return best != null ? best : sizes.get(0);
     }
 
     // ==============================================================
