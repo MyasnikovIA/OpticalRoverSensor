@@ -1,0 +1,980 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Карта — OpticalRover</title>
+    <link rel="icon" href="data:,">
+    <style>
+  body{margin:0;background:#101418;color:#e6f0f4;font:14px/1.4 monospace;padding:0}
+  header{background:#182028;padding:10px 14px;display:flex;justify-content:space-between;
+         align-items:center;flex-wrap:wrap;gap:8px}
+  header h1{font-size:15px;margin:0;color:#6cf}
+  header nav a{color:#6cf;text-decoration:none;margin-left:8px;padding:4px 10px;
+               border-radius:4px;border:1px solid #234}
+  header nav a.active{background:#248;border-color:#248;color:#fff}
+  main{padding:12px}
+  .card{background:#182028;border-radius:8px;padding:12px;margin-bottom:12px}
+  .card h2{font-size:14px;margin:0 0 10px;color:#adf}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .kv{background:#0e1418;border-radius:6px;padding:8px;min-width:100px}
+  .k{color:#8aa;font-size:11px;text-transform:uppercase}
+  .v{font-size:16px;color:#6cf}
+  .v.small{font-size:13px;color:#adf}
+  button{background:#248;color:#fff;border:0;border-radius:6px;padding:8px 14px;
+         cursor:pointer;font-family:monospace;font-size:13px;margin-right:6px;margin-bottom:6px}
+  button:active{background:#369}
+  button.green{background:#285}
+  button.orange{background:#a63}
+  button.red{background:#833}
+  button:disabled{background:#333;color:#777;cursor:not-allowed;opacity:0.7}
+  .hint{color:#8aa;font-size:11px;margin-top:6px;line-height:1.6}
+  .hint code{color:#adf;background:#0e1418;padding:1px 4px;border-radius:3px}
+  .warn{color:#fca;font-size:12px;margin-top:6px;background:#221408;
+        padding:6px 8px;border-radius:4px;border-left:3px solid #fa4}
+  .ok{color:#cfc;font-size:12px;margin-top:6px;background:#1c4a2c;
+      padding:6px 8px;border-radius:4px;border-left:3px solid #3c3}
+  #mapCanvas{width:100%;height:60vh;min-height:400px;max-height:700px;
+             background:#0b0f12;border-radius:6px;display:block;
+             touch-action:none;cursor:grab}
+  #mapCanvas:active{cursor:grabbing}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px;
+            font-size:12px;color:#8aa}
+  .controls label{display:flex;align-items:center;gap:4px;color:#e6f0f4}
+  .controls input[type=range]{width:130px}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:11px;color:#8aa;margin-top:8px}
+  .legend .sw{display:inline-block;width:14px;height:14px;vertical-align:-2px;
+              border-radius:2px;margin-right:4px}
+  .conn{font-size:11px;padding:4px 10px;border-radius:10px;background:#0e1418;display:inline-block}
+  .conn.on{color:#3c6;border:1px solid #3c6}
+  .conn.off{color:#f88;border:1px solid #f88}
+  .conn.pending{color:#fc8;border:1px solid #fc8}
+  .calibRow{background:#0e1418;border-radius:6px;padding:10px;margin:10px 0}
+  .calibRow .dur{background:#182028;color:#e6f0f4;border:1px solid #234;
+                 border-radius:4px;padding:6px 8px;width:80px;
+                 font-family:monospace;font-size:13px}
+  .calibBar{height:8px;background:#234;border-radius:4px;margin-top:8px;overflow:hidden}
+  .calibBar .fill{height:100%;background:#3c6;transition:width 0.15s linear}
+  .rotCalibPanel{background:#0e1418;border:1px solid #248;border-radius:6px;
+                 padding:10px;margin-top:10px}
+  .rotCalibPanel .big{font-size:22px;color:#6cf;margin:6px 0}
+  .rotCalibPanel input{background:#182028;color:#e6f0f4;border:1px solid #234;
+                       border-radius:4px;padding:6px 8px;width:90px;
+                       font-family:monospace;font-size:14px}
+</style>
+</head>
+<body>
+<header>
+    <h1>Карта</h1>
+    <nav>
+        <a href="index.html">Информация</a>
+        <a href="sensor.html">Live</a>
+        <a href="map.html" class="active">Карта</a>
+        <a href="config.html">Настройки</a>
+    </nav>
+</header>
+<main>
+
+    <div id="banner" class="warn" style="display:none"></div>
+
+    <div class="card">
+        <h2>Положение ровера</h2>
+
+        <div class="row" style="margin-bottom:10px">
+            <div class="kv"><div class="k">X, px</div><div class="v" id="stX">—</div></div>
+            <div class="kv"><div class="k">Y, px</div><div class="v" id="stY">—</div></div>
+            <div class="kv"><div class="k">Поворот, °</div><div class="v" id="stRot">—</div></div>
+            <div class="kv"><div class="k">deadband, px</div><div class="v small" id="stDb">—</div></div>
+            <div class="kv"><div class="k">точек следа</div><div class="v small" id="stTrail">—</div></div>
+            <div class="kv"><div class="k">калибровка поз.</div><div class="v small" id="stCal">—</div></div>
+            <div class="kv"><div class="k">калибровка угла</div><div class="v small" id="stRotCal">—</div></div>
+            <div class="kv"><div class="k">дельт (SSE)</div><div class="v small" id="stDeltas">0</div></div>
+            <div class="kv"><div class="k">причина</div><div class="v small" id="stReason">—</div></div>
+        </div>
+
+        <canvas id="mapCanvas" width="800" height="500"></canvas>
+
+        <div class="controls">
+            <span id="connStatus" class="conn pending">инициализация…</span>
+            <button onclick="forceFullRefresh()">⟳ Полный refetch</button>
+            <label><input type="checkbox" id="invertRotation"> Инвертировать поворот</label>
+        </div>
+
+        <!-- ============================================================ -->
+        <!-- КАЛИБРОВКА ПОВОРОТА (X-поток → угол)                          -->
+        <!-- ============================================================ -->
+        <div class="calibRow">
+            <h3 style="font-size:12px;color:#adf;margin:0 0 8px">
+                Калибровка поворота (X-поток → угол)
+            </h3>
+            <div id="rotCalibIdle">
+                <button class="orange" onclick="startRotCalib()">⏱ Старт калибровки</button>
+                <button onclick="clearRotCalib()">✕ Сбросить калибровку</button>
+                <div class="hint" id="rotCalibHint">
+                    Пока не откалибровано — используется block-matching (старый метод).
+                </div>
+            </div>
+            <div id="rotCalibPanel" class="rotCalibPanel" style="display:none">
+                <div style="color:#fc8;font-size:13px">
+                    ▶ Поверните устройство на известный угол (например, 90°)
+                    и введите его значение.
+                </div>
+                <div class="big">
+                    Накоплено X: <span id="rotCalibAccum">0.00</span> px
+                </div>
+                <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                    <span style="color:#adf">Угол поворота:</span>
+                    <input id="rotCalibAngle" type="number" min="1" max="3600" step="1" value="90">
+                    <span style="color:#adf">°</span>
+                    <button class="green" onclick="finishRotCalib()">✓ Завершить</button>
+                    <button onclick="cancelRotCalib()">✕ Отмена</button>
+                </div>
+                <div class="hint">
+                    Введите угол, на который вы реально повернули устройство
+                    (положительное = по часовой стрелке). Коэффициент px/°
+                    сохранится в конфиг и переживёт перезагрузку.
+                </div>
+            </div>
+            <div id="rotCalibStatus" style="margin-top:8px;color:#8aa;font-size:12px">—</div>
+        </div>
+
+        <!-- ============================================================ -->
+        <!-- КАЛИБРОВКА ПОКОЯ / НОЛЬ (без изменений)                       -->
+        <!-- ============================================================ -->
+        <div class="calibRow">
+            <div class="row" style="margin-bottom:6px">
+                <label style="color:#adf;font-size:12px;display:flex;align-items:center;gap:6px">
+                    Длительность калибровки:
+                    <input id="calibDurationSec" type="number" min="5" max="60" step="1"
+                           class="dur" value="5">
+                    сек (5–60)
+                </label>
+            </div>
+            <div class="row">
+                <button class="green" onclick="doZero()" id="btnZero">🎯 Установить ноль</button>
+                <button class="orange" onclick="doCalib(true)" id="btnCalibZero">
+                    ⏱ Калибровать покой + ноль</button>
+                <button onclick="doCalib(false)" id="btnCalibOnly">
+                    ⏱ Только калибровка покоя</button>
+                <button class="red" onclick="doResetPos()">↺ Сброс накопления</button>
+            </div>
+            <div id="calibStatusLine" style="margin-top:8px;color:#8aa;font-size:12px">
+                Калибровка покоя: <span id="calibState">не откалибровано</span>
+                <span id="calibRemain"></span>
+            </div>
+            <div class="calibBar" id="calibProgBar" style="display:none">
+                <div class="fill" id="calibFill" style="width:0%"></div>
+            </div>
+            <div id="calibDetails" style="margin-top:6px;color:#8aa;font-size:11px">—</div>
+        </div>
+
+        <div class="controls">
+            <button onclick="resetView()">⤢ Авто-масштаб</button>
+            <button onclick="centerOnDevice()">🎯 Центрировать</button>
+            <label>Zoom:
+                <input type="range" id="zoomSlider" min="0.2" max="15" step="0.1" value="2">
+                <span id="zoomVal">2.0×</span>
+            </label>
+            <label><input type="checkbox" id="showTrail" checked> След</label>
+            <label><input type="checkbox" id="showGrid"  checked> Сетка</label>
+            <label><input type="checkbox" id="showAxes"  checked> Оси/подписи</label>
+        </div>
+
+        <div class="legend">
+            <span><span class="sw" style="background:#3c6"></span>ровер (вершина = «вперёд»)</span>
+            <span><span class="sw" style="background:#6cf"></span>след движения</span>
+            <span><span class="sw" style="background:#484"></span>ноль (0, 0)</span>
+            <span>↑ «вперёд» · → «вправо»</span>
+        </div>
+
+        <div class="hint" style="margin-top:10px">
+            <b>Модель:</b> ровер движется вперёд/назад (Y-поток) и поворачивает
+            (X-поток). Позиция на карте — интеграл от «вперёд × текущий курс».
+            Курс берётся из X-потока с коэффициентом <code>rotCalibPxPerDeg</code>.
+        </div>
+    </div>
+
+</main>
+<script>
+(function() {
+  var $ = function(id){ return document.getElementById(id); };
+  var canvas = $('mapCanvas');
+  var ctx = canvas.getContext('2d');
+
+  // ============================================================
+  // View state
+  // ============================================================
+  var view = { offsetX: 0, offsetY: 0, scale: 2.0, autoFit: true };
+  var mapState = null;
+  var trail = [];
+  var MAX_TRAIL = 2000;
+  var TRAIL_MIN_DIST = 0.3;
+  var TRAIL_MIN_ROT  = 0.2;
+
+  function serverToMap(posX, posY) { return { x: posX, y: posY }; }
+  function trailPointToMap(tp) {
+    return { x: tp.x, y: tp.y, rot: tp.rot || 0, t: tp.t };
+  }
+
+  function cssW() { return canvas.getBoundingClientRect().width; }
+  function cssH() { return canvas.getBoundingClientRect().height; }
+
+  function worldToScreen(mapX, mapY) {
+    var cx = cssW() / 2, cy = cssH() / 2;
+    return {
+      x: cx + (mapX - view.offsetX) * view.scale,
+      y: cy - (mapY - view.offsetY) * view.scale
+    };
+  }
+  function screenToWorld(sx, sy) {
+    var cx = cssW() / 2, cy = cssH() / 2;
+    return {
+      x: view.offsetX + (sx - cx) / view.scale,
+      y: view.offsetY - (sy - cy) / view.scale
+    };
+  }
+
+  function resizeCanvas() {
+    var dpr = window.devicePixelRatio || 1;
+    var rect = canvas.getBoundingClientRect();
+    canvas.width  = Math.round(rect.width  * dpr);
+    canvas.height = Math.round(rect.height * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    render();
+  }
+
+  function autoFitBounds() {
+    if (!mapState) return;
+    var pts = [{ x: 0, y: 0 }];
+    pts.push(serverToMap(mapState.x_px || 0, mapState.y_px || 0));
+    var tail = trail.slice(-300);
+    for (var i = 0; i < tail.length; i++) pts.push(trailPointToMap(tail[i]));
+    var minX = 0, maxX = 0, minY = 0, maxY = 0;
+    for (var i = 0; i < pts.length; i++) {
+      if (pts[i].x < minX) minX = pts[i].x;
+      if (pts[i].x > maxX) maxX = pts[i].x;
+      if (pts[i].y < minY) minY = pts[i].y;
+      if (pts[i].y > maxY) maxY = pts[i].y;
+    }
+    var dx = Math.max(50, maxX - minX + 40);
+    var dy = Math.max(50, maxY - minY + 40);
+    var s  = Math.min(cssW()/dx, cssH()/dy);
+    view.offsetX = (minX + maxX) / 2;
+    view.offsetY = (minY + maxY) / 2;
+    view.scale   = Math.max(0.2, Math.min(15, s));
+    $('zoomSlider').value = view.scale;
+    $('zoomVal').textContent = view.scale.toFixed(1) + '×';
+  }
+
+  function render() {
+    if (!mapState) { clearCanvas(); return; }
+    if (view.autoFit) autoFitBounds();
+    clearCanvas();
+    if ($('showGrid').checked) drawGrid();
+    if ($('showTrail').checked) drawTrail();
+    if ($('showAxes').checked) drawOrigin();
+    drawDevice();
+  }
+
+  function clearCanvas() {
+    ctx.fillStyle = '#0b0f12';
+    ctx.fillRect(0, 0, cssW(), cssH());
+  }
+
+  function drawGrid() {
+    var step = 20;
+    var stepScreen = step * view.scale;
+    while (stepScreen < 30)  { step *= 2; stepScreen *= 2; }
+    while (stepScreen > 140) { step /= 2; stepScreen /= 2; }
+    var tl = screenToWorld(0, 0);
+    var br = screenToWorld(cssW(), cssH());
+    var minWX = Math.min(tl.x, br.x), maxWX = Math.max(tl.x, br.x);
+    var minWY = Math.min(tl.y, br.y), maxWY = Math.max(tl.y, br.y);
+    var startX = Math.floor(minWX / step) * step;
+    var endX   = Math.ceil (maxWX / step) * step;
+    var startY = Math.floor(minWY / step) * step;
+    var endY   = Math.ceil (maxWY / step) * step;
+    ctx.lineWidth = 1; ctx.strokeStyle = '#182028';
+    for (var x = startX; x <= endX; x += step) {
+      var p1 = worldToScreen(x, minWY), p2 = worldToScreen(x, maxWY);
+      ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+    }
+    for (var y = startY; y <= endY; y += step) {
+      var p1 = worldToScreen(minWX, y), p2 = worldToScreen(maxWX, y);
+      ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+    }
+    ctx.strokeStyle = '#2a3542'; ctx.lineWidth = 1.5;
+    var xa = worldToScreen(0, minWY), xb = worldToScreen(0, maxWY);
+    ctx.beginPath(); ctx.moveTo(xa.x, xa.y); ctx.lineTo(xb.x, xb.y); ctx.stroke();
+    var ya = worldToScreen(minWX, 0), yb = worldToScreen(maxWX, 0);
+    ctx.beginPath(); ctx.moveTo(ya.x, ya.y); ctx.lineTo(yb.x, yb.y); ctx.stroke();
+    ctx.fillStyle = '#5a6a7a'; ctx.font = '10px monospace'; ctx.textAlign = 'center';
+    var org = worldToScreen(0, 0);
+    for (var x = startX; x <= endX; x += step) {
+      if (x === 0) continue;
+      var p = worldToScreen(x, 0);
+      if (p.x > 22 && p.x < cssW() - 22)
+        ctx.fillText(String(x), p.x, Math.min(Math.max(org.y + 14, 14), cssH()-4));
+    }
+    ctx.textAlign = 'right';
+    for (var y = startY; y <= endY; y += step) {
+      if (y === 0) continue;
+      var p = worldToScreen(0, y);
+      if (p.y > 12 && p.y < cssH() - 12)
+        ctx.fillText(String(y), Math.min(Math.max(org.x - 4, 24), cssW()-4), p.y + 3);
+    }
+  }
+
+  function drawTrail() {
+    if (trail.length < 2) return;
+    ctx.lineWidth = 1.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    for (var i = 1; i < trail.length; i++) {
+      var a = trailPointToMap(trail[i-1]);
+      var b = trailPointToMap(trail[i]);
+      var p1 = worldToScreen(a.x, a.y);
+      var p2 = worldToScreen(b.x, b.y);
+      var age = trail.length - i;
+      var alpha = Math.max(0.12, 1 - age / Math.max(1, trail.length));
+      ctx.strokeStyle = 'rgba(108,204,255,' + alpha.toFixed(2) + ')';
+      ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+    }
+  }
+
+  function drawOrigin() {
+    var o = worldToScreen(0, 0);
+    ctx.strokeStyle = '#484'; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(o.x - 10, o.y); ctx.lineTo(o.x + 10, o.y);
+    ctx.moveTo(o.x, o.y - 10); ctx.lineTo(o.x, o.y + 10);
+    ctx.stroke();
+    ctx.fillStyle = '#484'; ctx.font = '10px monospace'; ctx.textAlign = 'left';
+    ctx.fillText('0', o.x + 8, o.y - 6);
+  }
+
+  function drawDevice() {
+    var m = serverToMap(mapState.x_px || 0, mapState.y_px || 0);
+    var p = worldToScreen(m.x, m.y);
+    var rot = mapState.rotation_deg || 0;
+    if ($('invertRotation').checked) rot = -rot;
+    var tip = (-90 + rot) * Math.PI / 180;
+    var size = 16;
+    var x1 = p.x + Math.cos(tip) * size;
+    var y1 = p.y + Math.sin(tip) * size;
+    var back = 2.6;
+    var x2 = p.x + Math.cos(tip + back) * size * 0.7;
+    var y2 = p.y + Math.sin(tip + back) * size * 0.7;
+    var x3 = p.x + Math.cos(tip - back) * size * 0.7;
+    var y3 = p.y + Math.sin(tip - back) * size * 0.7;
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.beginPath();
+    ctx.moveTo(x1+2, y1+2); ctx.lineTo(x2+2, y2+2); ctx.lineTo(x3+2, y3+2);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#3c6';
+    ctx.beginPath();
+    ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.lineTo(x3, y3);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(x1, y1, 2.5, 0, 2 * Math.PI); ctx.fill();
+    ctx.fillStyle = '#0b0f12';
+    ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, 2 * Math.PI); ctx.fill();
+    ctx.strokeStyle = 'rgba(108,204,255,0.5)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(x1, y1); ctx.stroke();
+  }
+
+  // --- pan / zoom ---
+  var drag = null;
+  canvas.addEventListener('mousedown', function(e){
+    drag = { sx: e.clientX, sy: e.clientY, ox: view.offsetX, oy: view.offsetY };
+    view.autoFit = false;
+  });
+  window.addEventListener('mousemove', function(e){
+    if (!drag) return;
+    var dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
+    view.offsetX = drag.ox - dx / view.scale;
+    view.offsetY = drag.oy + dy / view.scale;
+    render();
+  });
+  window.addEventListener('mouseup', function(){ drag = null; });
+
+  var touchStart = null;
+  canvas.addEventListener('touchstart', function(e){
+    if (e.touches.length === 1) {
+      touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY,
+                     ox: view.offsetX, oy: view.offsetY };
+      view.autoFit = false;
+    }
+  }, {passive:true});
+  canvas.addEventListener('touchmove', function(e){
+    if (!touchStart || e.touches.length !== 1) return;
+    var t = e.touches[0];
+    view.offsetX = touchStart.ox - (t.clientX - touchStart.x) / view.scale;
+    view.offsetY = touchStart.oy + (t.clientY - touchStart.y) / view.scale;
+    render(); e.preventDefault();
+  }, {passive:false});
+  canvas.addEventListener('touchend', function(){ touchStart = null; });
+
+  canvas.addEventListener('wheel', function(e){
+    e.preventDefault();
+    var rect = canvas.getBoundingClientRect();
+    var mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    var w = screenToWorld(mx, my);
+    var factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+    view.scale = Math.max(0.2, Math.min(15, view.scale * factor));
+    var cx = cssW()/2, cy = cssH()/2;
+    view.offsetX = w.x - (mx - cx) / view.scale;
+    view.offsetY = w.y + (my - cy) / view.scale;
+    view.autoFit = false;
+    $('zoomSlider').value = view.scale;
+    $('zoomVal').textContent = view.scale.toFixed(1) + '×';
+    render();
+  }, {passive:false});
+
+  function resetView() { view.autoFit = true; render(); }
+  function centerOnDevice() {
+    if (!mapState) return;
+    var m = serverToMap(mapState.x_px || 0, mapState.y_px || 0);
+    view.autoFit = false;
+    view.offsetX = m.x; view.offsetY = m.y; render();
+  }
+
+  // ============================================================
+  // Загрузка /api/sensor/map
+  // ============================================================
+  var readyForDeltas = false;
+  var pendingReadings = [];
+  var deltasReceived = 0;
+  var fullFetches    = 0;
+  var lastEventMs    = 0;
+  var lastZeroAt     = -1;
+  var lastPublishReason = '';
+
+  function showBanner(text, cls) {
+    var b = $('banner');
+    if (!text) { b.style.display = 'none'; return; }
+    b.style.display = '';
+    b.className = cls || 'warn';
+    b.textContent = text;
+  }
+
+    function fetchFullSnapshot(callback) {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/sensor/map', true);
+    xhr.timeout = 5000;
+    xhr.onload = function() {
+      if (xhr.status === 200) {
+        try {
+          var st = JSON.parse(xhr.responseText);
+          mapState = st;
+          // Берем сырой угол, чтобы избежать скачков 359->0
+          mapState.rotation_deg = st.rotation_raw_deg || 0;
+          trail = (st.trail && st.trail.length > 0) ? st.trail.slice() : [];
+          lastZeroAt = st.zero_set_at_ms || 0;
+          fullFetches++;
+          readyForDeltas = true;
+          showBanner(null);
+          while (pendingReadings.length) applyReading(pendingReadings.shift());
+          updateCounters();
+          updateCalibFromState(st);
+          if (st.rot_calib) updateRotCalibUi(st.rot_calib);
+          render();
+          if (callback) callback(true);
+          return;
+        } catch (e) {
+          showBanner('Ошибка разбора /map: ' + e.message);
+        }
+      } else if (xhr.status === 404) {
+        showBanner('GET /api/sensor/map → 404. Пересоберите APK.');
+      } else {
+        showBanner('GET /api/sensor/map → HTTP ' + xhr.status);
+      }
+      if (callback) callback(false);
+    };
+    xhr.onerror = function() { showBanner('/api/sensor/map: сервер не отвечает'); if (callback) callback(false); };
+    xhr.ontimeout = function() { showBanner('/api/sensor/map: таймаут'); if (callback) callback(false); };
+    xhr.send();
+  }
+
+  // ============================================================
+  // SSE
+  // ============================================================
+  var sseConn      = null;
+  var sseState     = 'idle';
+  var sseAttempts  = 0;
+  var sseConnectTimer = null;
+
+    function applyReading(reading) {
+    if (!reading || !reading.position) return;
+    var pos = reading.position;
+    var zeroAt = pos.zero_set_at_ms || 0;
+    if (lastZeroAt >= 0 && zeroAt !== lastZeroAt) {
+      lastZeroAt = zeroAt;
+      fetchFullSnapshot();
+      return;
+    }
+    lastZeroAt = zeroAt;
+    if (!mapState) mapState = { calibrated: false, deadband_px: 0, rotation_calibrated: false };
+    mapState.x_px = pos.x_px;
+    mapState.y_px = pos.y_px;
+    // Берем сырой угол из SSE
+    mapState.rotation_deg = pos.rotation_raw_deg || 0;
+    mapState.rotation_calibrated = !!pos.rotation_calibrated;
+    appendToTrail(pos.x_px, pos.y_px, mapState.rotation_deg,
+                  reading.timestamp_ms || Date.now());
+    lastEventMs = Date.now();
+    deltasReceived++;
+    lastPublishReason = reading.publish_reason || '';
+    updateCounters();
+    render();
+  }
+
+  function appendToTrail(x, y, rot, t) {
+    var last = trail[trail.length - 1];
+    if (last) {
+      var dx = x - last.x, dy = y - last.y;
+      var dr = Math.abs(((rot - last.rot + 540) % 360) - 180);
+      if (Math.hypot(dx, dy) < TRAIL_MIN_DIST && dr < TRAIL_MIN_ROT) return;
+    }
+    trail.push({ x: x, y: y, rot: rot, t: t });
+    while (trail.length > MAX_TRAIL) trail.shift();
+  }
+
+  function connectSse() {
+    if (sseConn) { try { sseConn.close(); } catch (e) {} sseConn = null; }
+    sseState = 'connecting'; updateStatus();
+    if (sseConnectTimer) { clearTimeout(sseConnectTimer); sseConnectTimer = null; }
+    var es;
+    try { es = new EventSource('/api/sensor/sse'); }
+    catch (e) { sseState = 'error'; updateStatus(); startFallbackPolling(); return; }
+    sseConn = es;
+    sseConnectTimer = setTimeout(function() {
+      if (sseState !== 'open') {
+        try { es.close(); } catch (e) {}
+        sseState = 'error'; updateStatus(); startFallbackPolling();
+      }
+    }, 6000);
+
+    es.onopen = function() {
+      sseState = 'open'; sseAttempts = 0;
+      if (sseConnectTimer) { clearTimeout(sseConnectTimer); sseConnectTimer = null; }
+      updateStatus();
+      if (!readyForDeltas) fetchFullSnapshot();
+    };
+    es.addEventListener('ready', function() { lastEventMs = Date.now(); updateStatus(); });
+    es.addEventListener('ping',  function() { lastEventMs = Date.now(); updateStatus(); });
+    es.addEventListener('reading', function(ev) {
+      try {
+        var reading = JSON.parse(ev.data);
+        if (!readyForDeltas) {
+          pendingReadings.push(reading);
+          if (pendingReadings.length > 500) pendingReadings.shift();
+          return;
+        }
+        applyReading(reading);
+      } catch (e) {}
+    });
+    es.onerror = function() {
+      sseState = 'error'; sseAttempts++; updateStatus();
+      if (sseAttempts >= 3 && !readyForDeltas) startFallbackPolling();
+    };
+  }
+
+  var fallbackTimer = null;
+    function startFallbackPolling() {
+    if (fallbackTimer) return;
+    if (sseConn) { try { sseConn.close(); } catch (e) {} sseConn = null; }
+    sseState = 'fallback'; updateStatus();
+    fallbackTimer = setInterval(function() {
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', '/api/sensor/map', true);
+      xhr.timeout = 3000;
+      xhr.onload = function() {
+        if (xhr.status !== 200) return;
+        try {
+          var st = JSON.parse(xhr.responseText);
+          mapState = st;
+          mapState.rotation_deg = st.rotation_raw_deg || 0;
+          trail = (st.trail && st.trail.length > 0) ? st.trail.slice() : [];
+          lastZeroAt = st.zero_set_at_ms || 0;
+          readyForDeltas = true;
+          lastEventMs = Date.now();
+          updateCounters();
+          if (st.rot_calib) updateRotCalibUi(st.rot_calib);
+          render();
+        } catch (e) {}
+      };
+      xhr.send();
+    }, 500);
+  }
+
+  function updateStatus() {
+    var el = $('connStatus');
+    var now = Date.now();
+    var txt, cls;
+    if (sseState === 'open') {
+      cls = 'on';
+      var ago = lastEventMs ? (now - lastEventMs) / 1000 : -1;
+      if (ago < 0)         txt = 'SSE: активно';
+      else if (ago < 2)    txt = 'SSE: активно • только что';
+      else if (ago < 15)   txt = 'SSE: активно • ' + ago.toFixed(1) + ' с назад';
+      else                 txt = 'SSE: активно • тишина ' + ago.toFixed(0) + ' с';
+      txt += ' • дельт: ' + deltasReceived;
+    } else if (sseState === 'connecting') {
+      cls = 'pending'; txt = 'SSE: подключение…';
+    } else if (sseState === 'error') {
+      cls = 'off'; txt = 'SSE: ошибка, реконнект (' + sseAttempts + ')';
+    } else if (sseState === 'fallback') {
+      cls = 'pending'; txt = 'Ajax fallback (500 мс)';
+    } else {
+      cls = 'pending'; txt = 'инициализация…';
+    }
+    el.className = 'conn ' + cls;
+    el.textContent = txt;
+  }
+
+  function updateCounters() {
+    if (!mapState) return;
+    $('stX').textContent      = (mapState.x_px || 0).toFixed(2);
+    $('stY').textContent      = (mapState.y_px || 0).toFixed(2);
+
+    // Нормализуем угол только для красивого отображения в тексте
+    var displayRot = ((mapState.rotation_deg || 0) % 360 + 360) % 360;
+    $('stRot').textContent    = displayRot.toFixed(1);
+
+    $('stDb').textContent     = (mapState.deadband_px || 0).toFixed(3);
+    $('stTrail').textContent  = trail.length;
+    $('stCal').textContent    = mapState.calibrated ? '✓' : '—';
+    $('stRotCal').textContent = mapState.rotation_calibrated ? '✓' : '—';
+    $('stDeltas').textContent = deltasReceived;
+    $('stReason').textContent = lastPublishReason || '—';
+  }
+
+  function updateCalibFromState(st) {
+    $('calibState').textContent =
+        st.calibrated ? '✓ откалибровано' : 'не откалибровано';
+    var det = 'deadband = ' + ((st.deadband_px || 0).toFixed(3)) + ' px';
+    if (typeof st.rot_deadband_deg === 'number')
+      det += ' · rotDeadband = ' + st.rot_deadband_deg.toFixed(2) + '°';
+    $('calibDetails').textContent = det;
+  }
+
+  setInterval(updateStatus, 1000);
+
+  // ============================================================
+  // КАЛИБРОВКА ПОВОРОТА
+  // ============================================================
+  var rotCalibPollTimer = null;
+
+  function updateRotCalibUi(c) {
+    if (!c) return;
+    if (c.active) {
+      $('rotCalibIdle').style.display  = 'none';
+      $('rotCalibPanel').style.display = '';
+    } else {
+      $('rotCalibIdle').style.display  = '';
+      $('rotCalibPanel').style.display = 'none';
+    }
+    if (c.calibrated && !c.active) {
+      $('rotCalibStatus').innerHTML =
+          '✓ калибровка поворота: <b>' + (c.pxPerDeg || 0).toFixed(3) +
+          ' px/°</b> · текущий угол ' + (c.currentRotationDeg || 0).toFixed(1) + '°';
+    } else if (!c.calibrated && !c.active) {
+      $('rotCalibStatus').innerHTML =
+          '— калибровка поворота не выполнена (используется block-matching)';
+    } else {
+      $('rotCalibStatus').innerHTML = '⏱ калибровка активна';
+    }
+    $('rotCalibAccum').textContent = (c.deltaPx || 0).toFixed(2);
+  }
+
+  function startRotCalibPoll() {
+    if (rotCalibPollTimer) return;
+    rotCalibPollTimer = setInterval(function() {
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', '/api/sensor/rotation-calib/status', true);
+      xhr.onload = function() {
+        if (xhr.status !== 200) return;
+        try {
+          var j = JSON.parse(xhr.responseText);
+          if (!j || !j.calib) return;
+          updateRotCalibUi(j.calib);
+          if (!j.calib.active) stopRotCalibPoll();
+        } catch (e) {}
+      };
+      xhr.send();
+    }, 300);
+  }
+  function stopRotCalibPoll() {
+    if (rotCalibPollTimer) { clearInterval(rotCalibPollTimer); rotCalibPollTimer = null; }
+  }
+
+  function startRotCalib() {
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/sensor/rotation-calib/start', true);
+    xhr.onload = function() {
+      try {
+        var j = JSON.parse(xhr.responseText);
+        if (j.ok) {
+          $('rotCalibIdle').style.display  = 'none';
+          $('rotCalibPanel').style.display = '';
+          $('rotCalibAngle').value = 90;
+          if (j.calib) updateRotCalibUi(j.calib);
+          startRotCalibPoll();
+        }
+      } catch (e) {}
+    };
+    xhr.send();
+  }
+
+  function finishRotCalib() {
+    var angle = parseFloat($('rotCalibAngle').value);
+    if (isNaN(angle) || Math.abs(angle) < 1) {
+      alert('Введите угол (не 0)');
+      return;
+    }
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/sensor/rotation-calib/finish', true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.onload = function() {
+      try {
+        var j = JSON.parse(xhr.responseText);
+        stopRotCalibPoll();
+        if (j.calib) updateRotCalibUi(j.calib);
+        if (j.ok) {
+          showBanner('Калибровка поворота: ' + (j.calib.pxPerDeg || 0).toFixed(3) + ' px/°', 'ok');
+          setTimeout(function(){ showBanner(null); }, 3000);
+          lastZeroAt = -1;
+          fetchFullSnapshot();
+        } else {
+          showBanner('Не удалось завершить калибровку (проверьте, был ли поворот)', 'warn');
+        }
+      } catch (e) {}
+    };
+    xhr.send(JSON.stringify({angleDeg: angle}));
+  }
+
+  function cancelRotCalib() {
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/sensor/rotation-calib/cancel', true);
+    xhr.onload = function() {
+      stopRotCalibPoll();
+      var x2 = new XMLHttpRequest();
+      x2.open('GET', '/api/sensor/rotation-calib/status', true);
+      x2.onload = function() {
+        try { var j = JSON.parse(x2.responseText); if (j.calib) updateRotCalibUi(j.calib); } catch (e) {}
+      };
+      x2.send();
+    };
+    xhr.send();
+  }
+
+  function clearRotCalib() {
+    if (!confirm('Сбросить калибровку поворота? Придётся калибровать заново.')) return;
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/sensor/rotation-calib/clear', true);
+    xhr.onload = function() {
+      var x2 = new XMLHttpRequest();
+      x2.open('GET', '/api/sensor/rotation-calib/status', true);
+      x2.onload = function() {
+        try { var j = JSON.parse(x2.responseText); if (j.calib) updateRotCalibUi(j.calib); } catch (e) {}
+      };
+      x2.send();
+    };
+    xhr.send();
+  }
+
+  // ============================================================
+  // КАЛИБРОВКА ПОКОЯ (без изменений)
+  // ============================================================
+  var calibPollTimer = null;
+
+  function doZero() {
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/sensor/zero', true);
+    xhr.onload = function() {
+      try {
+        var j = JSON.parse(xhr.responseText);
+        if (j && j.ok) {
+          showBanner('Ноль установлен: X=0, Y=0', 'ok');
+          setTimeout(function(){ showBanner(null); }, 2500);
+          lastZeroAt = -1;
+          fetchFullSnapshot();
+        }
+      } catch (e) {}
+    };
+    xhr.onerror = function() { showBanner('Ошибка сети при установке нуля'); };
+    xhr.send();
+  }
+
+  function doCalib(thenZero) {
+    var dur = parseInt($('calibDurationSec').value, 10);
+    if (isNaN(dur) || dur < 5) dur = 5;
+    if (dur > 60) dur = 60;
+    if (!confirm((thenZero ? 'Калибровка покоя + ноль.\n\n' : 'Калибровка покоя.\n\n')
+            + 'Длительность: ' + dur + ' сек.\nНе двигайте прибор.')) return;
+    setCalibButtonsEnabled(false);
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/sensor/calib/start', true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.onload = function() {
+      try {
+        var j = JSON.parse(xhr.responseText);
+        if (j && j.ok) {
+          showBanner('Калибровка ' + dur + ' сек… не двигайте прибор', 'warn');
+          if (j.calib) renderCalib(j.calib);
+        } else if (j && j.calib && j.calib.status === 'error_sensor_stopped') {
+          showBanner('Камера остановлена — запустите сенсор.', 'warn');
+          setCalibButtonsEnabled(true); return;
+        }
+      } catch (e) {}
+      pollCalib(thenZero);
+    };
+    xhr.onerror = function() { showBanner('Ошибка сети'); setCalibButtonsEnabled(true); };
+    xhr.send(JSON.stringify({thenZero: !!thenZero, durationSec: dur}));
+  }
+
+  function pollCalib(thenZero) {
+    if (calibPollTimer) return;
+    var startTime = Date.now();
+    calibPollTimer = setInterval(function() {
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', '/api/sensor/calib/status', true);
+      xhr.onload = function() {
+        try {
+          var j = JSON.parse(xhr.responseText);
+          if (!j || !j.calib) return;
+          renderCalib(j.calib);
+          var st = j.calib.status;
+          if (st === 'done' || st === 'aborted_motion'
+                  || st === 'error_too_few' || st === 'error_sensor_stopped') {
+            clearInterval(calibPollTimer);
+            calibPollTimer = null;
+            setCalibButtonsEnabled(true);
+            if (st === 'done') {
+              showBanner('Калибровка завершена' + (thenZero ? ', ноль установлен' : ''), 'ok');
+              setTimeout(function(){ showBanner(null); }, 3500);
+              lastZeroAt = -1;
+              fetchFullSnapshot();
+            } else if (st === 'aborted_motion') showBanner('Прервано: было движение.', 'warn');
+            else if (st === 'error_sensor_stopped') showBanner('Камера остановлена.', 'warn');
+            else showBanner('Мало сэмплов.', 'warn');
+          }
+          if (Date.now() - startTime > 70000) {
+            clearInterval(calibPollTimer); calibPollTimer = null;
+            setCalibButtonsEnabled(true);
+          }
+        } catch (e) {}
+      };
+      xhr.send();
+    }, 250);
+  }
+
+  function renderCalib(c) {
+    if (!c) return;
+    var st = c.status || 'idle';
+    if (st === 'sampling') {
+      var pct = Math.round(100 * (c.progress || 0));
+      if (pct > 100) pct = 100;
+      if (pct < 0) pct = 0;
+      $('calibProgBar').style.display = '';
+      $('calibFill').style.width = pct + '%';
+      $('calibState').textContent = '⏱ замер ' + pct + '%';
+      var rem = c.remainSec || 0;
+      $('calibRemain').textContent = rem > 0 ? ' (осталось ~' + rem.toFixed(1) + ' с)' : '';
+    } else {
+      $('calibProgBar').style.display = 'none';
+      $('calibRemain').textContent = '';
+      if (st === 'done') $('calibState').textContent = '✓ калибровка применена';
+      else if (st === 'aborted_motion') $('calibState').textContent = '✗ прервано: движение';
+      else if (st === 'error_too_few') $('calibState').textContent = '✗ мало сэмплов';
+      else if (st === 'error_sensor_stopped') $('calibState').textContent = '✗ камера остановлена';
+      else if (st === 'idle') $('calibState').textContent = 'не откалибровано';
+      else $('calibState').textContent = st;
+    }
+    var det = '';
+    det += 'bias X = ' + (c.posBiasX||0).toFixed(3) + ' px, '
+         + 'bias Y = ' + (c.posBiasY||0).toFixed(3) + ' px · ';
+    det += 'deadband = ' + (c.posDeadbandPx||0).toFixed(3) + ' px · ';
+    det += 'samples: ' + (c.samples||0) + '/' + (c.minSamples||30);
+    $('calibDetails').textContent = det;
+    if (typeof c.durationSec === 'number'
+            && !$('calibDurationSec').dataset.touched) {
+      $('calibDurationSec').value = c.durationSec;
+    }
+  }
+
+  function setCalibButtonsEnabled(en) {
+    $('btnZero').disabled      = !en;
+    $('btnCalibZero').disabled = !en;
+    $('btnCalibOnly').disabled = !en;
+  }
+
+  function doResetPos() {
+    if (!confirm('Сбросить позицию, поворот и след?')) return;
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/sensor/reset', true);
+    xhr.onload = function() {
+      trail = [];
+      if (mapState) {
+        mapState.x_px = 0; mapState.y_px = 0;
+        mapState.rotation_deg = 0;
+        mapState.trail_count = 0;
+      }
+      lastZeroAt = -1;
+      updateCounters();
+      render();
+      fetchFullSnapshot();
+    };
+    xhr.onerror = function() { showBanner('Ошибка сети при сбросе'); };
+    xhr.send();
+  }
+
+  function forceFullRefresh() { fetchFullSnapshot(); }
+
+  // UI handlers
+  $('zoomSlider').addEventListener('input', function(){
+    view.scale = parseFloat(this.value);
+    view.autoFit = false;
+    $('zoomVal').textContent = view.scale.toFixed(1) + '×';
+    render();
+  });
+  $('showTrail').addEventListener('change', render);
+  $('showGrid').addEventListener('change', render);
+  $('showAxes').addEventListener('change', render);
+  $('invertRotation').addEventListener('change', render);
+  $('calibDurationSec').addEventListener('input', function() {
+    this.dataset.touched = '1';
+  });
+
+  window.resetView        = resetView;
+  window.centerOnDevice   = centerOnDevice;
+  window.doResetPos       = doResetPos;
+  window.forceFullRefresh = forceFullRefresh;
+  window.doZero           = doZero;
+  window.doCalib          = doCalib;
+  window.startRotCalib    = startRotCalib;
+  window.finishRotCalib   = finishRotCalib;
+  window.cancelRotCalib   = cancelRotCalib;
+  window.clearRotCalib    = clearRotCalib;
+
+  window.addEventListener('resize', resizeCanvas);
+
+  // Start
+  resizeCanvas();
+  fetchFullSnapshot();
+
+  (function fetchRotCalibStatusOnce() {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/sensor/rotation-calib/status', true);
+    xhr.onload = function() {
+      if (xhr.status !== 200) return;
+      try { var j = JSON.parse(xhr.responseText); if (j.calib) updateRotCalibUi(j.calib); } catch (e) {}
+    };
+    xhr.send();
+  })();
+
+  connectSse();
+})();
+</script>
+</body>
+</html>
